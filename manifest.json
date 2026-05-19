@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "TechHacker - Privacy Guardian",
+  "version": "1.0.0",
+  "description": "Extensão Firefox para detectar ameaças à privacidade e rastreamento em páginas web",
+
+  "icons": {
+    "48": "icons/icon-48.svg",
+    "96": "icons/icon-96.svg"
+  },
+
+  "permissions": [
+    "webRequest",
+    "tabs",
+    "cookies",
+    "webNavigation",
+    "storage",
+    "scripting"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "scripts": ["src/background.js"]
+  },
+
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "TechHacker - Privacy Guardian",
+    "default_icon": {
+      "48": "icons/icon-48.svg",
+      "96": "icons/icon-96.svg"
+    }
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "techacker-privacy-guardian@insper.edu.br",
+      "strict_min_version": "120.0"
+    }
+  }
+}

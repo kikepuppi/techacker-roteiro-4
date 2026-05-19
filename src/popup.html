@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TechHacker - Privacy Guardian</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>TechHacker</h1>
+            <p class="subtitle">Privacy Guardian</p>
+        </div>
+
+        <!-- Privacy Score -->
+        <div class="privacy-score-section">
+            <div class="score-display">
+                <div class="score-circle" id="privacyScore">--</div>
+                <div class="score-label">Privacy Score</div>
+            </div>
+            <div class="score-description" id="scoreDescription">
+                Carregando análise...
+            </div>
+        </div>
+
+        <!-- Tabs para diferentes seções -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="overview">Visão Geral</button>
+            <button class="tab-button" data-tab="tracking">Rastreamento</button>
+            <button class="tab-button" data-tab="cookies">Cookies</button>
+            <button class="tab-button" data-tab="storage">Storage</button>
+            <button class="tab-button" data-tab="fingerprint">Fingerprinting</button>
+            <button class="tab-button" data-tab="hijacking">Hijacking</button>
+        </div>
+
+        <!-- Conteúdo das Abas -->
+        <div class="tab-content">
+            <!-- Overview -->
+            <div id="overview" class="tab-pane active">
+                <div class="stat-box">
+                    <h3>Estatísticas da Página</h3>
+                    <div class="stat-item">
+                        <span>Domínios Terceira Parte:</span>
+                        <span id="stat-third-party" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Cookies Detectados:</span>
+                        <span id="stat-cookies" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Tentativas de Fingerprinting:</span>
+                        <span id="stat-fingerprint" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span>Ameaças de Hijacking:</span>
+                        <span id="stat-hijacking" class="stat-value">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rastreamento -->
+            <div id="tracking" class="tab-pane">
+                <h3>Domínios Terceira Parte</h3>
+                <div id="tracking-list" class="item-list">
+                    <p class="empty-message">Nenhum rastreador detectado</p>
+                </div>
+            </div>
+
+            <!-- Cookies -->
+            <div id="cookies" class="tab-pane">
+                <h3>Cookies Detectados</h3>
+                <div id="cookies-list" class="item-list">
+                    <p class="empty-message">Nenhum cookie detectado ainda</p>
+                </div>
+            </div>
+
+            <!-- Storage -->
+            <div id="storage" class="tab-pane">
+                <h3>Web Storage</h3>
+                <div id="storage-list" class="item-list">
+                    <p class="empty-message">Nenhum dado em storage detectado</p>
+                </div>
+            </div>
+
+            <!-- Fingerprinting -->
+            <div id="fingerprint" class="tab-pane">
+                <h3>Tentativas de Fingerprinting</h3>
+                <div id="fingerprint-list" class="item-list">
+                    <p class="empty-message">Nenhuma tentativa de fingerprinting detectada</p>
+                </div>
+            </div>
+
+            <!-- Hijacking -->
+            <div id="hijacking" class="tab-pane">
+                <h3>Ameaças de Hijacking</h3>
+                <div id="hijacking-list" class="item-list">
+                    <p class="empty-message">Nenhuma ameaça de hijacking detectada</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>v1.0.0 - TechHacker @Insper</p>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
