@@ -62,18 +62,16 @@ function updateUI() {
  * Calcula Privacy Score baseado em detecções
  */
 function calculatePrivacyScore() {
-  // Começa com 100
   let score = 100;
 
-  // Penalidades
   if (currentPageData.thirdPartyDomains) {
     score -= Math.min(currentPageData.thirdPartyDomains.length * 2, 30);
   }
   if (currentPageData.fingerprinting) {
-    score -= currentPageData.fingerprinting.length * 5;
+    score -= Math.min(currentPageData.fingerprinting.length * 5, 30);
   }
   if (currentPageData.hijackingAttempts) {
-    score -= currentPageData.hijackingAttempts.length * 10;
+    score -= Math.min(currentPageData.hijackingAttempts.length * 10, 25);
   }
   if (currentPageData.cookies) {
     score -= Math.min(currentPageData.cookies.length * 1, 20);
@@ -132,16 +130,22 @@ function updateCookiesList() {
     return;
   }
 
-  list.innerHTML = cookies.map((cookie, index) => `
+  const partyLabel = (p) => (p === 'primeira' ? '1ª parte' : p === 'terceira' ? '3ª parte' : '?');
+
+  list.innerHTML = cookies
+    .map((cookie, index) => `
     <div class="item">
       <div class="item-header">
         <span class="item-title">${cookie.name || `Cookie ${index + 1}`}</span>
       </div>
       <div class="item-details">
-        <span class="badge">${cookie.party || 'desconhecida'}</span>
+        <span class="badge">${partyLabel(cookie.party)}</span>
+        <span class="badge">${cookie.lifetime || '?'}</span>
+        <span class="value">${cookie.domain || ''}</span>
       </div>
     </div>
-  `).join('');
+  `)
+    .join('');
 }
 
 /**

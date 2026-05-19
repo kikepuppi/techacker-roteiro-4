@@ -160,26 +160,23 @@
   // =========================================================================
   try {
     const origEval = window.eval;
-    // O eval é especial: redefinir window.eval cria um "indirect eval" que
-    // perde acesso ao escopo léxico do caller. Para nossa detecção isso é OK.
+    // Indirect eval. O Function constructor não é monitorado porque
+    // frameworks JS (jQuery, Vue, React, GTM) o usam normalmente para
+    // compilar templates — gera falso positivo demais.
+    // eval() com strings curtas também tende a ser benigno (polyfills,
+    // detecção de feature), então só sinalizamos código com tamanho
+    // relevante.
+    const EVAL_MIN_LEN = 50;
     window.eval = function (code) {
-      if (typeof code === 'string' && code.length > 0) {
-        emit('hijacking', { type: 'eval()', codeLength: code.length, sample: code.slice(0, 80) });
+      if (typeof code === 'string' && code.length >= EVAL_MIN_LEN) {
+        emit('hijacking', {
+          type: 'eval()',
+          codeLength: code.length,
+          sample: code.slice(0, 80),
+        });
       }
       return origEval.call(this, code);
     };
-
-    const origFunction = window.Function;
-    window.Function = new Proxy(origFunction, {
-      construct(target, args) {
-        emit('hijacking', { type: 'new Function()', argCount: args.length });
-        return new target(...args);
-      },
-      apply(target, thisArg, args) {
-        emit('hijacking', { type: 'Function()', argCount: args.length });
-        return target.apply(thisArg, args);
-      },
-    });
   } catch (e) {}
 
   try {

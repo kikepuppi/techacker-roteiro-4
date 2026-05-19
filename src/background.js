@@ -27,19 +27,94 @@ function ensureTab(tabId) {
   return pageData[tabId];
 }
 
-// Limpa dados quando uma aba é fechada
+function getBaseDomain(domain) {
+  if (!domain) return null;
+  const clean = domain.replace(/^\./, '');
+  const parts = clean.split('.');
+  return parts.length >= 2 ? parts.slice(-2).join('.') : clean;
+}
+
+// =============================================================================
+// Coleta de cookies
+// =============================================================================
+async function collectCookies(tabId) {
+  const data = pageData[tabId];
+  if (!data || !data.url) return;
+
+  let pageHostname;
+  try {
+    pageHostname = new URL(data.url).hostname;
+  } catch (e) {
+    return;
+  }
+  const pageBaseDomain = getBaseDomain(pageHostname);
+
+  // Cookies que seriam enviados para a URL da página (majoritariamente 1ª parte)
+  const firstPartyCookies = await browser.cookies
+    .getAll({ url: data.url })
+    .catch(() => []);
+
+  // Cookies de cada domínio 3ª parte que vimos via injected.js
+  const thirdPartyBaseDomains = new Set();
+  for (const entry of data.thirdPartyDomains) {
+    const base = getBaseDomain(entry.domain);
+    if (base && base !== pageBaseDomain) thirdPartyBaseDomains.add(base);
+  }
+
+  const thirdPartyCookies = [];
+  for (const base of thirdPartyBaseDomains) {
+    const cks = await browser.cookies.getAll({ domain: base }).catch(() => []);
+    thirdPartyCookies.push(...cks);
+  }
+
+  // Dedupe por (domain, name, path) e classifica
+  const seen = new Set();
+  const cookies = [];
+  for (const c of [...firstPartyCookies, ...thirdPartyCookies]) {
+    const key = `${c.domain}|${c.name}|${c.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const cookieBase = getBaseDomain(c.domain);
+    cookies.push({
+      name: c.name,
+      domain: c.domain,
+      path: c.path,
+      party: cookieBase === pageBaseDomain ? 'primeira' : 'terceira',
+      lifetime: c.session ? 'sessão' : 'persistente',
+      expirationDate: c.expirationDate || null,
+      secure: c.secure,
+      httpOnly: c.httpOnly,
+      sameSite: c.sameSite,
+    });
+  }
+
+  data.cookies = cookies;
+}
+
+// =============================================================================
+// Ciclo de vida das abas
+// =============================================================================
 browser.tabs.onRemoved.addListener((tabId) => {
   delete pageData[tabId];
 });
 
-// Quando o usuário navega para outra URL na mesma aba, zera os dados
+// Zera ao navegar para outra URL na mesma aba
 browser.webNavigation.onCommitted.addListener((details) => {
-  if (details.frameId !== 0) return; // só main frame
+  if (details.frameId !== 0) return;
   delete pageData[details.tabId];
 });
 
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // tabId vem do sender (content script) OU do próprio payload (popup)
+// Coleta cookies quando a página termina de carregar
+browser.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  collectCookies(details.tabId);
+});
+
+// =============================================================================
+// Mensagens
+// =============================================================================
+browser.runtime.onMessage.addListener(async (message, sender) => {
   const tabId =
     (sender && sender.tab && sender.tab.id) ??
     (message && message.tabId) ??
@@ -47,36 +122,34 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (tabId === null) {
     console.warn('[TechHacker] Mensagem sem tabId:', message);
-    sendResponse({ error: 'no tabId' });
-    return;
+    return { error: 'no tabId' };
   }
 
   switch (message.type) {
     case 'PAGE_LOADED': {
       const slot = ensureTab(tabId);
       slot.url = (sender.tab && sender.tab.url) || message.data?.url || null;
-      sendResponse({ status: 'ok' });
-      break;
+      return { status: 'ok' };
     }
 
     case 'ADD_THIRD_PARTY':
       ensureTab(tabId).thirdPartyDomains.push(message.data);
-      break;
+      return;
 
     case 'ADD_FINGERPRINT':
       ensureTab(tabId).fingerprinting.push(message.data);
-      break;
+      return;
 
     case 'ADD_HIJACKING':
       ensureTab(tabId).hijackingAttempts.push(message.data);
-      break;
+      return;
 
     case 'GET_PAGE_DATA':
-      sendResponse(pageData[tabId] || ensureTab(tabId));
-      break;
+      await collectCookies(tabId);
+      return pageData[tabId] || ensureTab(tabId);
 
     default:
       console.log('[TechHacker] Tipo desconhecido:', message.type);
-      sendResponse({ error: 'unknown type' });
+      return { error: 'unknown type' };
   }
 });
