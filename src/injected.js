@@ -128,35 +128,10 @@
   } catch (e) {}
 
   // =========================================================================
-  // 4. REDE — fetch e XMLHttpRequest (complemento ao webRequest do background)
-  // =========================================================================
-  try {
-    const origFetch = window.fetch;
-    window.fetch = function (input) {
-      try {
-        const url = typeof input === 'string' ? input : (input && input.url) || '';
-        const reqDomain = getDomain(url);
-        if (reqDomain && getBaseDomain(reqDomain) !== mainBaseDomain) {
-          emit('thirdParty', { domain: reqDomain, type: 'fetch', url: String(url) });
-        }
-      } catch (e) {}
-      return origFetch.apply(this, arguments);
-    };
-
-    const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (method, url) {
-      try {
-        const reqDomain = getDomain(url);
-        if (reqDomain && getBaseDomain(reqDomain) !== mainBaseDomain) {
-          emit('thirdParty', { domain: reqDomain, type: 'xhr', url: String(url) });
-        }
-      } catch (e) {}
-      return origOpen.apply(this, arguments);
-    };
-  } catch (e) {}
-
-  // =========================================================================
-  // 5. HIJACKING — eval, Function constructor, redirects
+  // 4. HIJACKING — eval, redirects
+  // (Rastreamento de rede agora é feito pelo background via webRequest API,
+  //  que vê TODAS as requisições — não só fetch/XHR — e expõe o tipo de
+  //  recurso. Removemos os hooks de fetch/XHR daqui para evitar duplicação.)
   // =========================================================================
   try {
     const origEval = window.eval;

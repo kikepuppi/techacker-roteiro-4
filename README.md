@@ -118,6 +118,40 @@ Reload da página é necessário depois de qualquer reload da extensão — os h
 
 ---
 
+## Rastreamento de Rede, Supercookies e Cookie Syncing
+
+A coleta de requisições de rede é feita pelo background usando a API `webRequest` do Firefox — não via hooks de `fetch`/`XHR` no page world. O motivo: `webRequest` vê **todas** as requisições do navegador (incluindo imagens, fontes, iframes, websockets), expõe o tipo de recurso (`script`, `image`, `xmlhttprequest`, `font`, etc.) e funciona mesmo em páginas que reescrevem `fetch`/`XHR`.
+
+> O Firefox manteve `webRequest` no Manifest V3. O Chrome migrou para `declarativeNetRequest` em 2025, perdendo essa capacidade — o que aliás é uma das razões pelas quais o roteiro foca em Firefox.
+
+### Domínios 3ª parte com tipo de recurso
+
+A aba **Rastreamento** agrupa por domínio e mostra badges com os tipos de recurso (`script`, `imagem`, `iframe`, `xhr`, `font`, `media`, ...) que esse domínio serviu.
+
+### Candidatos a Supercookie
+
+Supercookies sobrevivem à limpeza de cookies. A extensão monitora cabeçalhos de resposta via `webRequest.onHeadersReceived` para duas heurísticas:
+
+| Tipo | Sinal | Onde |
+|---|---|---|
+| **ETag** | Header `ETag` em respostas de 3ª parte com tipo `image`, `ping` ou `xmlhttprequest` (pixels de tracking podem usar ETag como ID persistente). ETags que parecem hash de conteúdo (32/40/64 hex — MD5/SHA1/SHA256, padrão de cache em CDN) são descartados | Aba Cookies → "Candidatos a Supercookie" |
+| **HSTS** | Header `Strict-Transport-Security` com `max-age` > 1 ano em resposta de 3ª parte (potencial canal de fingerprint persistente via cache HSTS) | Aba Cookies → "Candidatos a Supercookie" |
+
+São **candidatos**, não detecções definitivas. ETag também é usado legitimamente para cache. A interpretação fica a cargo do usuário.
+
+### Cookie Syncing
+
+Detectado em `webRequest.onBeforeRequest` analisando query strings de requisições 3ª parte:
+
+1. Para cada requisição 3ª parte, extrai params cujo nome bate em `^(uid|user_id|userid|user|id|gid|cid|did|sid|fid|cookie_?id|partner_?id|sync|guid|adid|uuid|tuuid|tu_id|tdid|euid|ext_id)$` (lista derivada de padrões usados por DSPs/SSPs comuns).
+2. Filtra valores com formato de ID (alfanumérico, 10-200 chars).
+3. Mantém um mapa `valor → Set<domínio>` por aba.
+4. Quando o mesmo valor aparece em ≥2 domínios diferentes, registra um evento de syncing.
+
+Limitações: a heurística pega apenas IDs passados via query string (a forma mais comum), não via POST body nem fragmentos. Falsos negativos esperados para trackers que ofuscam o ID via hashing.
+
+---
+
 ## Privacy Score - Metodologia
 
 A pontuação começa em 100 e sofre penalidades capadas para cada vetor. Todos os tetos garantem que nenhum vetor isolado zere o score sozinho, e a soma máxima possível de penalidades é -105 (i.e. piora pode ser severa, mas refletida em camadas).

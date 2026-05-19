@@ -52,7 +52,9 @@ function updateUI() {
 
   // Atualiza listas
   updateTrackingList();
+  updateSyncList();
   updateCookiesList();
+  updateSupercookiesList();
   updateStorageList();
   updateFingerprintList();
   updateHijackingList();
@@ -96,26 +98,77 @@ function getScoreDescription(score) {
  */
 function updateTrackingList() {
   const list = document.getElementById('tracking-list');
-  const domains = currentPageData.thirdPartyDomains || [];
+  const entries = currentPageData.thirdPartyDomains || [];
 
-  if (domains.length === 0) {
+  if (entries.length === 0) {
     list.innerHTML = '<p class="empty-message">Nenhum rastreador detectado</p>';
     return;
   }
 
-  // Remove duplicatas
-  const uniqueDomains = [...new Set(domains.map(d => d.domain))];
+  // Agrupa por domínio, agregando os tipos de recurso (script, imagem, xhr, etc).
+  const byDomain = new Map();
+  for (const e of entries) {
+    if (!byDomain.has(e.domain)) byDomain.set(e.domain, new Set());
+    byDomain.get(e.domain).add(e.type || 'outro');
+  }
 
-  list.innerHTML = uniqueDomains.map(domain => `
+  list.innerHTML = [...byDomain.entries()]
+    .map(([domain, types]) => {
+      const badges = [...types].map((t) => `<span class="badge">${t}</span>`).join('');
+      return `
     <div class="item">
       <div class="item-header">
         <span class="item-title">${domain}</span>
       </div>
-      <div class="item-details">
-        <span class="badge">3ª Parte</span>
+      <div class="item-details">${badges}</div>
+    </div>`;
+    })
+    .join('');
+}
+
+function updateSyncList() {
+  const list = document.getElementById('sync-list');
+  const syncs = currentPageData.cookieSyncing || [];
+
+  if (syncs.length === 0) {
+    list.innerHTML = '<p class="empty-message">Nenhum sincronismo detectado</p>';
+    return;
+  }
+
+  list.innerHTML = syncs
+    .map((s) => `
+    <div class="item warning">
+      <div class="item-header">
+        <span class="item-title">${s.paramName} = ${s.value.slice(0, 32)}${s.value.length > 32 ? '…' : ''}</span>
       </div>
-    </div>
-  `).join('');
+      <div class="item-details">
+        ${s.domains.map((d) => `<span class="badge">${d}</span>`).join('')}
+      </div>
+    </div>`)
+    .join('');
+}
+
+function updateSupercookiesList() {
+  const list = document.getElementById('supercookies-list');
+  const items = currentPageData.supercookies || [];
+
+  if (items.length === 0) {
+    list.innerHTML = '<p class="empty-message">Nenhum supercookie detectado</p>';
+    return;
+  }
+
+  list.innerHTML = items
+    .map((s) => `
+    <div class="item warning">
+      <div class="item-header">
+        <span class="item-title">${s.domain}</span>
+      </div>
+      <div class="item-details">
+        <span class="badge">${s.kind.toUpperCase()}</span>
+        <span class="value">${s.value || ''}</span>
+      </div>
+    </div>`)
+    .join('');
 }
 
 /**
