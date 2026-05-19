@@ -91,10 +91,31 @@
     }
     try {
       const dbs = await window.indexedDB.databases();
+      // navigator.storage.estimate() retorna uso TOTAL da origem (inclui IDB,
+      // Cache API, ServiceWorker, etc). Não dá tamanho por banco — a API web
+      // não expõe isso sem abrir cada IDB —, mas é o melhor sinal de tamanho
+      // disponível e atende ao requisito do roteiro de "exibir tamanhos".
+      let originBytes = null;
+      if (navigator.storage && typeof navigator.storage.estimate === 'function') {
+        try {
+          const est = await navigator.storage.estimate();
+          originBytes = est.usage || null;
+        } catch (e) {}
+      }
+      // Distribui o uso total proporcionalmente ao número de bancos (heurística
+      // — não há como atribuir bytes a um banco específico). Se houver só 1
+      // banco, ele recebe o total; se houver N, cada um recebe ~total/N.
+      const sharedSize = dbs.length > 0 && originBytes != null
+        ? Math.round(originBytes / dbs.length)
+        : null;
       return dbs.map((db) => ({
         name: db.name || '(sem nome)',
         version: db.version || 0,
         domain: window.location.hostname,
+        size: sharedSize, // bytes (estimativa por divisão; ver comentário)
+        sizeNote: originBytes != null
+          ? `~${(originBytes / 1024).toFixed(1)} KB de uso total da origem`
+          : null,
       }));
     } catch (e) {
       return [];

@@ -160,7 +160,9 @@ O `content.js` (isolated world) tem acesso ao storage da origem da página, porq
 |---|---|---|
 | `localStorage` | iteração `storage.length` + `storage.key(i)` + `storage.getItem(key)` | Chave, tamanho aproximado (chars × 2 = UTF-16), domínio |
 | `sessionStorage` | Idem | Idem |
-| IndexedDB | `indexedDB.databases()` (lista nomes + versão; não abrimos os bancos para evitar locks) | Nome do banco, versão, domínio |
+| IndexedDB | `indexedDB.databases()` (lista nomes + versão; não abrimos os bancos para evitar locks) | Nome do banco, versão, domínio, tamanho estimado |
+
+> Tamanho de IndexedDB: a API web não expõe bytes por banco sem abrir e iterar registros. Usamos `navigator.storage.estimate()` que retorna o **uso total da origem** (inclui IDB, Cache API, ServiceWorker) e dividimos pelo número de bancos como heurística. É aproximação, não medição exata — documentado também na UI.
 
 A coleta é feita só no main frame — iframes têm origens próprias e seu próprio content script já trataria seu storage se quiséssemos. A leitura é forçada sempre que o popup abre (background → content via `tabs.sendMessage`), evitando snapshots stale.
 
@@ -217,7 +219,7 @@ Os pesos refletem a gravidade percebida: hijacking (-10) > fingerprinting (-5) >
 - **Mesmo proprietário detectado como 3ª parte**: o heurístico de "base domain" (últimas 2 partes) trata `glbimg.com` e `globo.com` como 3ª parte entre si, mesmo sendo da mesma empresa. A solução completa exigiria a Public Suffix List + uma entity list (estilo Disconnect).
 - **Supercookies são candidatos, não certezas**: ETag também é usado para cache legítimo. Aplicamos filtro de hash hex (MD5/SHA1/SHA256) para reduzir falso positivo, mas formatos como nginx weak-ETag (`W/"<hex>-<hash>"`) ainda passam.
 - **Cookie syncing só captura IDs via query string** — não via POST body nem fragmentos, e falha para IDs ofuscados via hash.
-- **IndexedDB lista apenas nomes e versões dos bancos** — não abrimos os bancos para inspecionar object stores (evitaria locks/erros). Tamanho real não é exposto.
+- **IndexedDB: tamanho é estimativa, não medição** — usamos `navigator.storage.estimate()` (uso total da origem) dividido pelo nº de bancos; a API web não expõe bytes por IDB específico sem abrir e iterar. Não inspecionamos object stores nem registros (evita locks).
 - **Storage de iframes não é agregado no main frame** — cada iframe tem sua própria origem e content script; só coletamos do main frame.
 - **Reload é necessário após reload da extensão** — os hooks de fingerprinting/hijacking só são instalados durante o `document_start` da próxima navegação.
 - **Detecção de script suspeito é heurística por URL** — atacantes podem renomear paths/portas para escapar. Cobertura real exigiria assinatura/análise de conteúdo.
