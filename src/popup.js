@@ -13,17 +13,17 @@ let currentPageData = {};
  */
 async function loadPageData() {
   try {
-    // Obtém a aba atual
     const tabs = await browser.tabs.query({ active: true, currentWindow: true });
     const currentTab = tabs[0];
+    if (!currentTab) return;
 
-    // Solicita dados do background script
     const data = await browser.runtime.sendMessage({
-      type: 'GET_PAGE_DATA'
+      type: 'GET_PAGE_DATA',
+      tabId: currentTab.id,
     });
 
-    currentPageData = data;
-    console.log('[TechHacker Popup] Dados carregados:', data);
+    currentPageData = data || {};
+    console.log('[TechHacker Popup] Dados carregados:', currentPageData);
 
     updateUI();
   } catch (error) {

@@ -1,212 +1,57 @@
 /**
  * Content Script - TechHacker Privacy Guardian
- * 
- * Este script é injetado em TODA página visitada e:
- * - Monitora requisições de rede
- * - Detecta tentativas de fingerprinting
- * - Detecta hijacking
- * - Coleta dados de cookies e storage
+ *
+ * Roda em isolated world. Responsabilidades:
+ *  - Injetar src/injected.js no MAIN world (mesmo contexto JS da página)
+ *    para que os hooks de Canvas/WebGL/Audio/fetch/eval funcionem.
+ *  - Escutar window.postMessage do script injetado e repassar ao background.
  */
 
-console.log('[TechHacker Content] Script iniciado em:', window.location.href);
+(function () {
+  'use strict';
 
-// Extrai domínio da URL
-function getDomain(url) {
+  // Injeta o script no contexto da página.
+  // Importante: appendChild antes do head ser parseado garante que os hooks
+  // estejam ativos antes do JS da página rodar (content_scripts é
+  // document_start no manifest).
   try {
-    return new URL(url).hostname;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Domínio da página atual
-const mainDomain = getDomain(window.location.href);
-
-// Notifica background que a página carregou
-browser.runtime.sendMessage({
-  type: 'PAGE_LOADED',
-  data: {
-    url: window.location.href,
-    timestamp: new Date().toISOString()
-  }
-});
-
-// ============================================================
-// 1. DETECÇÃO DE FINGERPRINTING
-// ============================================================
-
-console.log('[TechHacker] Iniciando monitoramento de fingerprinting...');
-
-// Monitora Canvas API
-const originalCanvasToDataURL = HTMLCanvasElement.prototype.toDataURL;
-HTMLCanvasElement.prototype.toDataURL = function(...args) {
-  const stack = new Error().stack;
-  const caller = stack.split('\n')[2];
-  
-  browser.runtime.sendMessage({
-    type: 'ADD_FINGERPRINT',
-    data: {
-      method: 'Canvas.toDataURL',
-      caller: caller,
-      timestamp: new Date().toISOString()
-    }
-  });
-  
-  return originalCanvasToDataURL.apply(this, args);
-};
-
-// Monitora Canvas getImageData
-const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-CanvasRenderingContext2D.prototype.getImageData = function(...args) {
-  browser.runtime.sendMessage({
-    type: 'ADD_FINGERPRINT',
-    data: {
-      method: 'Canvas.getImageData',
-      timestamp: new Date().toISOString()
-    }
-  });
-  
-  return originalGetImageData.apply(this, args);
-};
-
-// Monitora WebGL
-try {
-  const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(pname) {
-    if (pname === 37445) { // WEBGL_debug_renderer_info
-      browser.runtime.sendMessage({
-        type: 'ADD_FINGERPRINT',
-        data: {
-          method: 'WebGL.getParameter (RENDERER_INFO)',
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-    return originalGetParameter.call(this, pname);
-  };
-} catch (e) {
-  console.log('[TechHacker] WebGL não disponível');
-}
-
-// Monitora AudioContext
-try {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (AudioContext) {
-    const originalCreateOscillator = AudioContext.prototype.createOscillator;
-    AudioContext.prototype.createOscillator = function() {
-      browser.runtime.sendMessage({
-        type: 'ADD_FINGERPRINT',
-        data: {
-          method: 'AudioContext.createOscillator',
-          timestamp: new Date().toISOString()
-        }
-      });
-      return originalCreateOscillator.call(this);
+    const script = document.createElement('script');
+    script.src = browser.runtime.getURL('src/injected.js');
+    script.async = false;
+    script.onload = function () {
+      this.remove();
     };
+    (document.head || document.documentElement).appendChild(script);
+  } catch (e) {
+    console.warn('[TechHacker] Falha ao injetar script no page world:', e);
   }
-} catch (e) {
-  console.log('[TechHacker] AudioContext não disponível');
-}
 
-// ============================================================
-// 2. DETECÇÃO DE HIJACKING
-// ============================================================
+  // Avisa o background que a página carregou (cria o slot de pageData).
+  browser.runtime.sendMessage({
+    type: 'PAGE_LOADED',
+    data: { url: window.location.href },
+  });
 
-console.log('[TechHacker] Iniciando monitoramento de hijacking...');
+  // Mapeia categorias do injected.js → tipos de mensagem do background.
+  const CATEGORY_TO_TYPE = {
+    fingerprint: 'ADD_FINGERPRINT',
+    thirdParty: 'ADD_THIRD_PARTY',
+    hijacking: 'ADD_HIJACKING',
+  };
 
-// Monitora mudanças em window.location
-const originalLocationReplace = window.location.replace;
-Object.defineProperty(window, 'location', {
-  set: function(value) {
-    browser.runtime.sendMessage({
-      type: 'ADD_HIJACKING',
-      data: {
-        type: 'location.replace',
-        newLocation: value,
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
+  // Recebe eventos do MAIN world via postMessage e encaminha ao background.
+  window.addEventListener('message', function (event) {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.__techacker !== 'TECHACKER_EVENT') return;
 
-// Monitora mudanças no DOM perigosas (eval, dynamic scripts)
-const originalEval = window.eval;
-window.eval = function(code) {
-  if (code && code.length > 0) {
-    browser.runtime.sendMessage({
-      type: 'ADD_HIJACKING',
-      data: {
-        type: 'eval() chamado',
-        codeLength: code.length,
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-  return originalEval.apply(this, arguments);
-};
+    const type = CATEGORY_TO_TYPE[data.category];
+    if (!type) return;
 
-// ============================================================
-// 3. MONITORAMENTO DE REQUISIÇÕES
-// ============================================================
-
-console.log('[TechHacker] Monitoramento de requisições iniciado');
-
-// Função para extrair domínio base (ex: google.com de www.google.com)
-function getBaseDomain(domain) {
-  const parts = domain.split('.');
-  if (parts.length >= 2) {
-    return parts.slice(-2).join('.');
-  }
-  return domain;
-}
-
-// Hook fetch API
-const originalFetch = window.fetch;
-window.fetch = function(...args) {
-  const url = args[0];
-  if (url) {
-    const requestDomain = getDomain(url);
-    const requestBaseDomain = getBaseDomain(requestDomain);
-    const mainBaseDomain = getBaseDomain(mainDomain);
-
-    if (requestBaseDomain !== mainBaseDomain && requestDomain) {
-      browser.runtime.sendMessage({
-        type: 'ADD_THIRD_PARTY',
-        data: {
-          domain: requestDomain,
-          type: 'fetch',
-          url: url,
-          timestamp: new Date().toISOString()
-        }
-      });
+    try {
+      browser.runtime.sendMessage({ type: type, data: data.payload });
+    } catch (e) {
+      // background pode estar reiniciando — ignora silenciosamente
     }
-  }
-
-  return originalFetch.apply(this, arguments);
-};
-
-// Hook XMLHttpRequest
-const originalOpen = XMLHttpRequest.prototype.open;
-XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-  if (url) {
-    const requestDomain = getDomain(url);
-    const requestBaseDomain = getBaseDomain(requestDomain);
-    const mainBaseDomain = getBaseDomain(mainDomain);
-
-    if (requestBaseDomain !== mainBaseDomain && requestDomain) {
-      browser.runtime.sendMessage({
-        type: 'ADD_THIRD_PARTY',
-        data: {
-          domain: requestDomain,
-          type: 'XHR',
-          url: url,
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-  }
-
-  return originalOpen.apply(this, [method, url, ...rest]);
-};
-
-console.log('[TechHacker Content] Monitoramento completo iniciado');
+  });
+})();

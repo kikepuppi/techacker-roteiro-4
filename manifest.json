@@ -44,6 +44,13 @@
     }
   ],
 
+  "web_accessible_resources": [
+    {
+      "resources": ["src/injected.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
   "browser_specific_settings": {
     "gecko": {
       "id": "techacker-privacy-guardian@insper.edu.br",
