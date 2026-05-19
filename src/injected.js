@@ -154,6 +154,23 @@
     };
   } catch (e) {}
 
+  // Detecta document.write injetando <script> dinamicamente — padrão clássico
+  // de injeção de hook (BeEF, ad fraud, malvertising)
+  try {
+    const origWrite = document.write;
+    document.write = function (markup) {
+      try {
+        if (typeof markup === 'string' && /<script\b/i.test(markup)) {
+          emit('hijacking', {
+            type: 'document.write injetando script',
+            sample: markup.slice(0, 120),
+          });
+        }
+      } catch (e) {}
+      return origWrite.apply(this, arguments);
+    };
+  } catch (e) {}
+
   try {
     const origAssign = window.location.assign;
     const origReplace = window.location.replace;

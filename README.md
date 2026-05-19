@@ -152,28 +152,55 @@ Limitações: a heurística pega apenas IDs passados via query string (a forma m
 
 ---
 
+## Web Storage (localStorage, sessionStorage, IndexedDB)
+
+O `content.js` (isolated world) tem acesso ao storage da origem da página, porque storage é escopado por origem, não por contexto JS. Coletamos no evento `load` e a cada abertura do popup:
+
+| Storage | Como é lido | O que mostramos |
+|---|---|---|
+| `localStorage` | iteração `storage.length` + `storage.key(i)` + `storage.getItem(key)` | Chave, tamanho aproximado (chars × 2 = UTF-16), domínio |
+| `sessionStorage` | Idem | Idem |
+| IndexedDB | `indexedDB.databases()` (lista nomes + versão; não abrimos os bancos para evitar locks) | Nome do banco, versão, domínio |
+
+A coleta é feita só no main frame — iframes têm origens próprias e seu próprio content script já trataria seu storage se quiséssemos. A leitura é forçada sempre que o popup abre (background → content via `tabs.sendMessage`), evitando snapshots stale.
+
+---
+
+## Hijacking e Hooking
+
+Detectamos quatro padrões clássicos, com viés conservador para não gerar falso positivo:
+
+| Sinal | Onde é detectado |
+|---|---|
+| `location.assign` / `location.replace` cross-domain | `injected.js` (page world) |
+| `eval()` com payload ≥50 caracteres | `injected.js` |
+| `document.write()` injetando `<script>` | `injected.js` |
+| Script src com padrão de framework de exploração (BeEF `hook.js`, `/beef/`, porta `:3000/hook`, metasploit `/autopwn/`) | `background.js` (`webRequest.onBeforeRequest` sobre requests do tipo `script`) |
+
+`Function()` foi intencionalmente excluído: bibliotecas como jQuery, Vue, React e GTM o usam para compilar templates, gerando falso positivo em praticamente todo site real.
+
+A detecção de script suspeito por padrão de URL roda também para 1ª parte — uma vulnerabilidade XSS pode injetar BeEF dentro do próprio domínio comprometido, e nesse caso o atacante hospedaria o hook em qualquer URL (inclusive same-origin).
+
+---
+
 ## Privacy Score - Metodologia
 
-A pontuação começa em 100 e sofre penalidades capadas para cada vetor. Todos os tetos garantem que nenhum vetor isolado zere o score sozinho, e a soma máxima possível de penalidades é -105 (i.e. piora pode ser severa, mas refletida em camadas).
+A pontuação começa em 100 e sofre penalidades capadas para cada vetor. Todos os tetos garantem que nenhum vetor isolado zere o score sozinho, e a soma máxima possível de penalidades é -135.
 
 | Vetor | Penalidade unitária | Teto |
 |---|---|---|
-| Domínio de 3ª parte | -2 | -30 |
+| Domínio de 3ª parte (dedup por domínio) | -2 | -30 |
 | Tentativa de fingerprinting (Canvas/WebGL/Audio) | -5 | -30 |
 | Ameaça de hijacking | -10 | -25 |
 | Cookie (1ª + 3ª parte) | -1 | -20 |
+| Candidato a supercookie (ETag/HSTS) | -3 | -15 |
+| Evento de cookie syncing | -3 | -15 |
 
 ### Por que os tetos
 
 Sem tetos, sites com muitos componentes (CMS, ad networks, frameworks) zerariam o score mesmo quando o comportamento é típico. Os tetos limitam o impacto de cada categoria a uma faixa que ainda comunica gravidade — uma página com 100+ trackers e fingerprinting agressivo ainda fica em "Crítico", mas o score permanece interpretável.
 
-### Critério de hijacking
-
-A versão atual sinaliza apenas:
-- `location.assign` / `location.replace` cross-domain
-- `eval()` com payload de ≥50 caracteres (descarta polyfills/feature detection curtos)
-
-O construtor `Function()` foi intencionalmente excluído da detecção: bibliotecas como jQuery, Vue, React e GTM o usam para compilar templates, o que gera falso positivo em quase todo site real.
+Os pesos refletem a gravidade percebida: hijacking (-10) > fingerprinting (-5) > supercookie/syncing (-3) > 3ª parte (-2) > cookie (-1). Domínios 3ª parte são deduplicados por domínio (não conta cada tipo de recurso separadamente, evitando dupla-contagem quando um único tracker serve script + imagem + xhr).
 
 ### Interpretação
 
@@ -187,6 +214,10 @@ O construtor `Function()` foi intencionalmente excluído da detecção: bibliote
 
 ## Limitações Conhecidas
 
-- Algumas técnicas sofisticadas de fingerprinting podem não ser detectadas
-- A detecção depende de quando a página injeta os scripts
-- Alguns redirecionamentos podem não ser capturados
+- **Mesmo proprietário detectado como 3ª parte**: o heurístico de "base domain" (últimas 2 partes) trata `glbimg.com` e `globo.com` como 3ª parte entre si, mesmo sendo da mesma empresa. A solução completa exigiria a Public Suffix List + uma entity list (estilo Disconnect).
+- **Supercookies são candidatos, não certezas**: ETag também é usado para cache legítimo. Aplicamos filtro de hash hex (MD5/SHA1/SHA256) para reduzir falso positivo, mas formatos como nginx weak-ETag (`W/"<hex>-<hash>"`) ainda passam.
+- **Cookie syncing só captura IDs via query string** — não via POST body nem fragmentos, e falha para IDs ofuscados via hash.
+- **IndexedDB lista apenas nomes e versões dos bancos** — não abrimos os bancos para inspecionar object stores (evitaria locks/erros). Tamanho real não é exposto.
+- **Storage de iframes não é agregado no main frame** — cada iframe tem sua própria origem e content script; só coletamos do main frame.
+- **Reload é necessário após reload da extensão** — os hooks de fingerprinting/hijacking só são instalados durante o `document_start` da próxima navegação.
+- **Detecção de script suspeito é heurística por URL** — atacantes podem renomear paths/portas para escapar. Cobertura real exigiria assinatura/análise de conteúdo.

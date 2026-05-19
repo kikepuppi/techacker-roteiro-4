@@ -187,7 +187,30 @@ function inspectSyncing(tabId, requestUrl, requestDomain) {
   }
 }
 
-// onBeforeRequest: 3ª parte + cookie syncing
+// Heurísticas de scripts suspeitos para hijacking/hooking. Conservadoras
+// (poucos falsos positivos), pegando padrões clássicos de framework de
+// exploração de browser.
+const SUSPICIOUS_SCRIPT_PATTERNS = [
+  { name: 'BeEF hook.js', re: /\/hook\.js(\?|$)/i },
+  { name: 'BeEF path', re: /\/beef\//i },
+  { name: 'BeEF default port', re: /:3000\/hook/i },
+  { name: 'metasploit autopwn', re: /\/autopwn\//i },
+];
+
+function inspectSuspiciousScript(slot, url) {
+  for (const p of SUSPICIOUS_SCRIPT_PATTERNS) {
+    if (p.re.test(url)) {
+      slot.hijackingAttempts.push({
+        type: `script suspeito: ${p.name}`,
+        target: url.slice(0, 200),
+        timestamp: Date.now(),
+      });
+      return;
+    }
+  }
+}
+
+// onBeforeRequest: 3ª parte + cookie syncing + scripts suspeitos
 browser.webRequest.onBeforeRequest.addListener(
   (details) => {
     const tabId = details.tabId;
@@ -207,10 +230,16 @@ browser.webRequest.onBeforeRequest.addListener(
     if (!reqHost) return;
     const reqBase = getBaseDomain(reqHost);
 
-    if (!reqBase || reqBase === pageBase) return; // 1ª parte, ignora
-
     const slot = ensureTab(tabId);
     if (!slot.url) slot.url = pageUrl;
+
+    // Scripts suspeitos: aplicar mesmo para 1ª parte (BeEF/exploit pode estar
+    // hospedado no próprio domínio comprometido)
+    if (details.type === 'script') {
+      inspectSuspiciousScript(slot, details.url);
+    }
+
+    if (!reqBase || reqBase === pageBase) return; // 1ª parte, ignora p/ tracking
 
     const typeLabel = TYPE_LABELS[details.type] || details.type;
     const key = `${reqHost}|${typeLabel}`;
@@ -328,6 +357,22 @@ function publicView(slot) {
   return rest;
 }
 
+// Pede ao content script um snapshot fresco de storage. Falha silenciosamente
+// em URLs onde o content script não pode rodar (about:, moz-extension:, etc).
+async function refreshStorageFromContent(tabId) {
+  try {
+    const snap = await browser.tabs.sendMessage(tabId, { type: 'COLLECT_STORAGE' });
+    if (snap) {
+      const slot = ensureTab(tabId);
+      slot.localStorage = snap.localStorage || [];
+      slot.sessionStorage = snap.sessionStorage || [];
+      slot.indexedDB = snap.indexedDB || [];
+    }
+  } catch (e) {
+    // sem content script disponível
+  }
+}
+
 browser.runtime.onMessage.addListener(async (message, sender) => {
   const tabId =
     (sender && sender.tab && sender.tab.id) ??
@@ -360,8 +405,17 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
       ensureTab(tabId).thirdPartyDomains.push(message.data);
       return;
 
+    case 'STORAGE_SNAPSHOT': {
+      const slot = ensureTab(tabId);
+      slot.localStorage = message.data.localStorage || [];
+      slot.sessionStorage = message.data.sessionStorage || [];
+      slot.indexedDB = message.data.indexedDB || [];
+      return;
+    }
+
     case 'GET_PAGE_DATA':
       await collectCookies(tabId);
+      await refreshStorageFromContent(tabId);
       return publicView(pageData[tabId] || ensureTab(tabId));
 
     default:

@@ -67,7 +67,9 @@ function calculatePrivacyScore() {
   let score = 100;
 
   if (currentPageData.thirdPartyDomains) {
-    score -= Math.min(currentPageData.thirdPartyDomains.length * 2, 30);
+    // Dedup por domínio (não conta cada tipo de recurso separadamente)
+    const unique = new Set(currentPageData.thirdPartyDomains.map((d) => d.domain));
+    score -= Math.min(unique.size * 2, 30);
   }
   if (currentPageData.fingerprinting) {
     score -= Math.min(currentPageData.fingerprinting.length * 5, 30);
@@ -77,6 +79,12 @@ function calculatePrivacyScore() {
   }
   if (currentPageData.cookies) {
     score -= Math.min(currentPageData.cookies.length * 1, 20);
+  }
+  if (currentPageData.supercookies) {
+    score -= Math.min(currentPageData.supercookies.length * 3, 15);
+  }
+  if (currentPageData.cookieSyncing) {
+    score -= Math.min(currentPageData.cookieSyncing.length * 3, 15);
   }
 
   return Math.max(0, Math.min(100, score));
@@ -206,27 +214,35 @@ function updateCookiesList() {
  */
 function updateStorageList() {
   const list = document.getElementById('storage-list');
-  const storage = currentPageData.localStorage || [];
-  const sessionStorage = currentPageData.sessionStorage || [];
+  const localItems = currentPageData.localStorage || [];
+  const sessionItems = currentPageData.sessionStorage || [];
+  const idbItems = currentPageData.indexedDB || [];
 
-  const items = [...storage, ...sessionStorage];
-
-  if (items.length === 0) {
+  if (localItems.length === 0 && sessionItems.length === 0 && idbItems.length === 0) {
     list.innerHTML = '<p class="empty-message">Nenhum dado em storage detectado</p>';
     return;
   }
 
-  list.innerHTML = items.map((item, index) => `
+  const renderEntry = (item, index) => `
     <div class="item">
       <div class="item-header">
-        <span class="item-title">${item.key || `Storage ${index + 1}`}</span>
+        <span class="item-title">${item.key || item.name || `Item ${index + 1}`}</span>
       </div>
       <div class="item-details">
-        <span class="badge">${item.type || 'localStorage'}</span>
-        <span class="value">${(item.size || 0)} bytes</span>
+        <span class="badge">${item.type || 'IndexedDB'}</span>
+        ${item.size != null ? `<span class="value">${item.size} bytes</span>` : ''}
+        ${item.version != null ? `<span class="value">v${item.version}</span>` : ''}
+        <span class="value">${item.domain || ''}</span>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+
+  const allItems = [
+    ...localItems,
+    ...sessionItems,
+    ...idbItems.map((db) => ({ ...db, type: 'IndexedDB' })),
+  ];
+
+  list.innerHTML = allItems.map(renderEntry).join('');
 }
 
 /**
@@ -284,16 +300,17 @@ function setupTabs() {
   const tabButtons = document.querySelectorAll('.tab-button');
   const tabPanes = document.querySelectorAll('.tab-pane');
 
-  tabButtons.forEach(button => {
+  tabButtons.forEach((button) => {
     button.addEventListener('click', () => {
-      // Remove active de todos
-      tabButtons.forEach(b => b.classList.remove('active'));
-      tabPanes.forEach(p => p.classList.remove('active'));
+      tabButtons.forEach((b) => b.classList.remove('active'));
+      tabPanes.forEach((p) => p.classList.remove('active'));
 
-      // Adiciona active ao clicado
       button.classList.add('active');
       const tabName = button.getAttribute('data-tab');
       document.getElementById(tabName).classList.add('active');
+
+      // Força refresh imediato ao trocar de aba (não esperar o polling de 2s)
+      loadPageData();
     });
   });
 }
